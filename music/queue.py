@@ -1,52 +1,48 @@
-from collections import deque
-
-
 class MusicQueue:
 
     def __init__(self):
-        self._queues = {}
+        self.queues = {}
 
-    def _get_queue(self, chat_id):
+    def _get(self, chat_id):
+        return self.queues.setdefault(chat_id, [])
 
-        if chat_id not in self._queues:
-            self._queues[chat_id] = deque()
-
-        return self._queues[chat_id]
-
-    def add(self, chat_id, track):
-
-        queue = self._get_queue(chat_id)
-        queue.append(track)
+    def add(self, chat_id, song):
+        queue = self._get(chat_id)
+        queue.append(song)
+        return len(queue)
 
     def pop(self, chat_id):
-
-        queue = self._get_queue(chat_id)
+        queue = self._get(chat_id)
 
         if not queue:
             return None
 
-        return queue.popleft()
+        return queue.pop(0)
 
     def peek(self, chat_id):
-
-        queue = self._get_queue(chat_id)
+        queue = self._get(chat_id)
 
         if not queue:
             return None
 
         return queue[0]
 
-    def all(self, chat_id):
-
-        return list(self._get_queue(chat_id))
+    def get_all(self, chat_id):
+        return self._get(chat_id)
 
     def clear(self, chat_id):
+        self.queues[chat_id] = []
 
-        self._get_queue(chat_id).clear()
+    def remove(self, chat_id, index):
+        queue = self._get(chat_id)
+
+        if index < 1 or index > len(queue):
+            return None
+
+        return queue.pop(index - 1)
 
     def size(self, chat_id):
-
-        return len(self._get_queue(chat_id))
+        return len(self._get(chat_id))
 
 
 music_queue = MusicQueue()
