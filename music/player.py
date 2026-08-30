@@ -1,78 +1,166 @@
-from typing import Optional
+import os
 
-from pytgcalls.types import AudioPiped
 from pytgcalls import PyTgCalls
+from pytgcalls.types import AudioPiped
 
-from music.models import Track
+from telegram.voice import calls
+
+from music.queue import music_queue
+from music.search import search_song
+from music.downloader import download_audio
 
 
 class MusicPlayer:
 
-    def __init__(self, calls: PyTgCalls):
-        self.calls = calls
+    def __init__(self):
+        self.current = {}
 
-        # Current track for each Telegram group
-        self.current_tracks: dict[int, Track] = {}
-
-        # Playback state
-        self.paused: set[int] = set()
-
-    async def play(
-        self,
-        chat_id: int,
-        track: Track,
-    ):
-
-        await self.calls.play(
-            chat_id,
-            AudioPiped(track.file_path),
-        )
-
-        self.current_tracks[chat_id] = track
-        self.paused.discard(chat_id)
+    async def play(self, chat_id, query, quality="high"):
 
         print(
-            f"▶️ Playing '{track.title}' "
-            f"in {chat_id}"
+            f"🎵 Play request | chat={chat_id} | query={query}"
         )
 
-    async def pause(self, chat_id: int):
+        song = search_song(query)
 
-        await self.calls.pause(chat_id)
+        if not song:
+            return {
+                "status": "error",
+                "message": "Song not found",
+            }
 
-        self.paused.add(chat_id)
+        song["requested_query"] = query
 
-        print(f"⏸ Paused {chat_id}")
+        # If something is already playing, add to queue
+        if chat_id in self.current:
 
-    async def resume(self, chat_id: int):
+            position = music_queue.add(
+                chat_id,
+                song,
+            )
 
-        await self.calls.resume(chat_id)
+            return {
+                "status": "queued",
+                "title": song["title"],
+                "position": position,
+            }
 
-        self.paused.discard(chat_id)
+        return await self._start_song(
+            chat_id,
+            song,
+            quality,
+        )
 
-        print(f"▶️ Resumed {chat_id}")
+    async def _start_song(
+        self,
+        chat_id,
+        song,
+        quality="high",
+    ):
 
-    async def stop(self, chat_id: int):
+        print(f"⬇️ Preparing: {song['title']}")
 
-        await self.calls.leave_call(chat_id)
+        try:
 
-        self.current_tracks.pop(chat_id, None)
-        self.paused.discard(chat_id)
+            audio_file = download_audio(
+                song["webpage_url"],
+                quality,
+            )
 
-        print(f"⏹ Stopped {chat_id}")
+            print(f"▶️ Starting: {song['title']}")
 
-    async def skip(self, chat_id: int):
+            await calls.play(
+                chat_id,
+                AudioPiped(audio_file),
+            )
 
-        # For now skip simply stops the current track.
-        # Queue integration will be added next.
-        await self.stop(chat_id)
+            self.current[chat_id] = {
+                **song,
+                "file": audio_file,
+                "quality": quality,
+            }
 
-        print(f"⏭ Skipped {chat_id}")
+            return {
+                "status": "playing",
+                "title": song["title"],
+            }
 
-    def current(self, chat_id: int) -> Optional[Track]:
+        except Exception as e:
 
-        return self.current_tracks.get(chat_id)
+            print(
+                f"❌ Playback error: {type(e).__name__}: {e}"
+            )
 
-    def is_paused(self, chat_id: int) -> bool:
+            return {
+                "status": "error",
+                "message": str(e),
+            }
 
-        return chat_id in self.paused
+    async def skip(self, chat_id):
+
+        current = self.current.pop(
+            chat_id,
+            None,
+        )
+
+        if current:
+            self._delete_file(current)
+
+        next_song = music_queue.pop(chat_id)
+
+        if not next_song:
+
+            try:
+                await calls.leave_call(chat_id)
+            except Exception:
+                pass
+
+            return {
+                "status": "stopped",
+            }
+
+        return await self._start_song(
+            chat_id,
+            next_song,
+        )
+
+    async def stop(self, chat_id):
+
+        music_queue.clear(chat_id)
+
+        current = self.current.pop(
+            chat_id,
+            None,
+        )
+
+        if current:
+            self._delete_file(current)
+
+        try:
+            await calls.leave_call(chat_id)
+        except Exception:
+            pass
+
+        return {
+            "status": "stopped",
+        }
+
+    def get_current(self, chat_id):
+        return self.current.get(chat_id)
+
+    def get_queue(self, chat_id):
+        return music_queue.get_all(chat_id)
+
+    def _delete_file(self, song):
+
+        filename = song.get("file")
+
+        if filename and os.path.exists(filename):
+
+            try:
+                os.remove(filename)
+            except Exception:
+                pass
+
+
+player = MusicPlayer()
