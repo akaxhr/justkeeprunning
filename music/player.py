@@ -5,36 +5,28 @@ from .queue import add, get_next
 
 
 async def play_song(calls, chat_id, query):
+    song = await get_audio(query)
 
-    audio = await get_audio(query)
-
-    song = {
-        "query": query,
-        "audio": audio,
-    }
-
-    # If something is already playing, queue it
     if chat_id in calls.active_calls:
         add(chat_id, song)
 
         return {
             "status": "queued",
-            "query": query,
+            "song": song,
         }
 
     await calls.play(
         chat_id,
-        AudioPiped(audio),
+        AudioPiped(song["url"]),
     )
 
     return {
         "status": "playing",
-        "query": query,
+        "song": song,
     }
 
 
 async def play_next(calls, chat_id):
-
     song = get_next(chat_id)
 
     if not song:
@@ -42,7 +34,7 @@ async def play_next(calls, chat_id):
 
     await calls.play(
         chat_id,
-        AudioPiped(song["audio"]),
+        AudioPiped(song["url"]),
     )
 
     return song
