@@ -1,25 +1,22 @@
-class MusicQueue:
+from collections import defaultdict, deque
 
-    def __init__(self):
-        self.data = {}
-
-    def get(self, chat_id):
-        return self.data.setdefault(chat_id, [])
-
-    def add(self, chat_id, song):
-        queue = self.get(chat_id)
-        queue.append(song)
-        return len(queue)
-
-    def next(self, chat_id):
-        queue = self.get(chat_id)
-        return queue.pop(0) if queue else None
-
-    def clear(self, chat_id):
-        self.data[chat_id] = []
-
-    def all(self, chat_id):
-        return self.get(chat_id)
+queues = defaultdict(deque)
 
 
-queue = MusicQueue()
+def add(chat_id, song):
+    queues[chat_id].append(song)
+
+
+def get_next(chat_id):
+    if not queues[chat_id]:
+        return None
+
+    return queues[chat_id].popleft()
+
+
+def get_queue(chat_id):
+    return list(queues[chat_id])
+
+
+def clear(chat_id):
+    queues[chat_id].clear()
