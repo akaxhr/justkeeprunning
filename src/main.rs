@@ -1,6 +1,9 @@
 use anyhow::Result;
 use ferogram::Client;
 use std::env;
+use tgcalls::Calls;
+
+const CHAT_ID: i64 = -1003843699243;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -11,7 +14,7 @@ async fn main() -> Result<()> {
 
     println!("🔐 Loading Telegram session...");
 
-    let (_client, _) =
+    let (client, _) =
         Client::quick_connect(
             "/app/icha_music.session",
             api_id,
@@ -20,7 +23,16 @@ async fn main() -> Result<()> {
         .await?;
 
     println!("✅ Telegram music account connected!");
-    println!("🎵 Worker is ready.");
+
+    let calls = Calls::new(client);
+
+    println!("🎙️ Joining VC...");
+    println!("🎵 Playing test.mp3...");
+
+    calls.play(CHAT_ID, "/app/test.mp3").await?;
+
+    println!("✅ Playback started!");
+    println!("🎵 Worker staying alive...");
 
     tokio::signal::ctrl_c().await?;
 
