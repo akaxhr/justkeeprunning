@@ -9,18 +9,18 @@ async fn main() -> Result<()> {
     let api_id: i32 = env::var("API_ID")?.parse()?;
     let api_hash = env::var("API_HASH")?;
 
-    println!("🔐 Connecting to Telegram...");
+    println!("🔐 Loading Telegram session...");
 
     let (_client, _) =
         Client::quick_connect(
-            "icha_music.session",
+            "/app/icha_music.session",
             api_id,
             &api_hash,
         )
         .await?;
 
-    println!("✅ Telegram account connected!");
-    println!("🎵 Music worker ready.");
+    println!("✅ Telegram music account connected!");
+    println!("🎵 Worker is ready.");
 
     tokio::signal::ctrl_c().await?;
 
