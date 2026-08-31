@@ -1,15 +1,19 @@
-FROM node:22-bookworm
+FROM rust:1.88-bookworm
 
-RUN apt-get update \
-    && apt-get install -y ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y ffmpeg pkg-config libssl-dev git cmake && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY package.json .
+RUN git clone https://github.com/ankit-chaubey/tgcalls.git
 
-RUN npm install
+WORKDIR /app/tgcalls
 
-COPY . .
+RUN cargo build --release --example group_audio_call
 
-CMD ["npm", "start"]
+WORKDIR /app
+
+COPY src ./src
+
+CMD ["./tgcalls/target/release/examples/group_audio_call"]
