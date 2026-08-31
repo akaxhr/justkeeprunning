@@ -1,6 +1,6 @@
 pyrogram==2.0.106
 tgcrypto==1.2.5
-py-tgcalls==3.0.0.dev6
+py-tgcalls==3.0.0
 fastapi
 uvicorn
 yt-dlp
