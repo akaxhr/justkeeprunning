@@ -1,4 +1,6 @@
-pyrogram==2.0.106
+Pyrogram
+Telethon
+Hydrogram
 tgcrypto==1.2.5
 py-tgcalls==2.2.11
 fastapi
