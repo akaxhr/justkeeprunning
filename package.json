@@ -1,0 +1,13 @@
+{
+  "name": "icha-music-worker",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "telegram": "^2.26.22",
+    "gram-tgcalls": "latest",
+    "tgcalls": "latest"
+  }
+}
