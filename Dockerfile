@@ -6,14 +6,9 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-RUN git clone https://github.com/ankit-chaubey/tgcalls.git
-
-WORKDIR /app/tgcalls
-
-RUN cargo build --release --example group_audio_call
-
-WORKDIR /app
-
+COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
 
-CMD ["./tgcalls/target/release/examples/group_audio_call"]
+RUN cargo build --release
+
+CMD ["./target/release/icha-music-worker"]
