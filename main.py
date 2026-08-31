@@ -2,7 +2,6 @@ import asyncio
 import uvicorn
 
 from telegram.client import app_telegram
-from telegram.voice import start_voice
 from api.server import app
 
 
