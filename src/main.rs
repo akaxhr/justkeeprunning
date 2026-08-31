@@ -1,13 +1,27 @@
-use tgcalls::Calls;
+use anyhow::Result;
+use ferogram::Client;
+use std::env;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🎵 Icha Music Worker starting...");
+async fn main() -> Result<()> {
+    println!("🎵 Icha Music Worker");
+    println!("Connecting to Telegram...");
 
-    // Telegram client/session setup goes here.
-    // We will connect this to your existing music-account session.
+    let api_id: i32 = env::var("API_ID")?
+        .parse()?;
 
-    println!("🎵 Worker ready.");
+    let api_hash = env::var("API_HASH")?;
+
+    let (client, _) =
+        Client::quick_connect(
+            "icha_music.session",
+            api_id,
+            &api_hash,
+        )
+        .await?;
+
+    println!("✅ Telegram authentication successful!");
+    println!("🎵 Music worker is ready.");
 
     tokio::signal::ctrl_c().await?;
 
