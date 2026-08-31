@@ -15,12 +15,17 @@ app_telegram = Client(
     session_string=SESSION_STRING,
 )
 
-calls = PyTgCalls(app_telegram)
+calls = None
 
 
 async def start_telegram():
 
+    global calls
+
     await app_telegram.start()
+
+    calls = PyTgCalls(app_telegram)
+
     await calls.start()
 
     me = await app_telegram.get_me()
