@@ -1,0 +1,8 @@
+[package]
+name = "icha-music-worker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tgcalls = "0.2"
+tokio = { version = "1", features = ["full"] }
