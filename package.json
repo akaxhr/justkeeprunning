@@ -6,7 +6,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "telegram": "^2.26.22",
+    "teleproto": "latest",
     "gram-tgcalls": "latest",
     "tgcalls": "latest"
   }
