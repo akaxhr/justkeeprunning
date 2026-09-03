@@ -1,4 +1,3 @@
-
 use anyhow::Result;
 use std::sync::Arc;
 use tgcalls::Calls;
@@ -6,11 +5,12 @@ use tgcalls::Calls;
 pub async fn play(
     calls: &Arc<Calls>,
     chat_id: i64,
-    filename: &str,
+    audio_url: &str,
 ) -> Result<()> {
     println!("🎙️ Starting Telegram playback...");
+    println!("🔗 Audio stream URL ready");
 
-    calls.play(chat_id, filename).await?;
+    calls.play(chat_id, audio_url).await?;
 
     println!("✅ Playback started");
 
@@ -26,4 +26,3 @@ pub async fn play(
 
     Ok(())
 }
-
