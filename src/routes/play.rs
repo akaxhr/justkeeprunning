@@ -7,7 +7,7 @@ use axum::{
 use crate::{
     auth::authorized,
     downloader::download_audio,
-    models::{PlayRequest, PlayResponse, SongInfo},
+    models::{PlayRequest, PlayResponse},
     playback,
     state::AppState,
 };
