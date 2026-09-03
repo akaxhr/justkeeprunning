@@ -1,16 +1,18 @@
 
 use anyhow::Result;
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, VecDeque},
     env,
     sync::Arc,
 };
+use tokio::sync::Mutex;
 use tgcalls::Calls;
 
 const DEFAULT_CHAT_ID: i64 = -1003843699243;
@@ -19,6 +21,14 @@ const DEFAULT_CHAT_ID: i64 = -1003843699243;
 struct AppState {
     calls: Arc<Calls>,
     worker_secret: String,
+    queues: Arc<Mutex<HashMap<i64, VecDeque<Song>>>>,
+    current: Arc<Mutex<HashMap<i64, Song>>>,
+}
+
+#[derive(Debug, Clone)]
+struct Song {
+    title: String,
+    filename: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,11 +47,29 @@ struct SongInfo {
 struct PlayResponse {
     status: String,
     song: SongInfo,
+    position: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct QueueResponse {
+    current: Option<SongInfo>,
+    queue: Vec<SongInfo>,
+}
+
+#[derive(Debug, Serialize)]
+struct SkipResponse {
+    status: String,
+    title: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct StopResponse {
+    status: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🎵 Icha Music Worker starting — REAL MUSIC v2");
+    println!("🎵 Icha Music Worker starting — QUEUE v1");
 
     let api_id: i32 = env::var("API_ID")?.parse()?;
     let api_hash = env::var("API_HASH")?;
@@ -64,10 +92,15 @@ async fn main() -> Result<()> {
     let state = AppState {
         calls,
         worker_secret,
+        queues: Arc::new(Mutex::new(HashMap::new())),
+        current: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = Router::new()
         .route("/play", post(play))
+        .route("/skip", post(skip))
+        .route("/stop", post(stop))
+        .route("/queue/{chat_id}", get(queue))
         .with_state(state);
 
     let port = env::var("PORT")
@@ -77,7 +110,8 @@ async fn main() -> Result<()> {
 
     println!("🌐 Music worker API listening on {address}");
 
-    let listener = tokio::net::TcpListener::bind(&address).await?;
+    let listener =
+        tokio::net::TcpListener::bind(&address).await?;
 
     axum::serve(listener, app).await?;
 
@@ -122,10 +156,14 @@ async fn play(
         println!("🎚️ Quality: {quality}");
     }
 
+    /*
+     * Download first.
+     */
     let filename = format!(
-        "/tmp/icha-{}-{}.mp3",
+        "/tmp/icha-{}-{}-{}.mp3",
         chat_id,
-        std::process::id()
+        std::process::id(),
+        unique_id()
     );
 
     let title = download_audio(&query, &filename)
@@ -139,26 +177,70 @@ async fn play(
             )
         })?;
 
-    println!("🎧 Download complete: {title}");
+    let song = Song {
+        title,
+        filename,
+    };
+
+    /*
+     * Check whether this chat is already playing something.
+     */
+    let mut current = state.current.lock().await;
+
+    if current.contains_key(&chat_id) {
+        drop(current);
+
+        let mut queues = state.queues.lock().await;
+
+        let queue = queues
+            .entry(chat_id)
+            .or_insert_with(VecDeque::new);
+
+        queue.push_back(song.clone());
+
+        let position = queue.len();
+
+        println!(
+            "🎶 Queued '{}' at position {}",
+            song.title, position
+        );
+
+        return Ok(Json(PlayResponse {
+            status: "queued".to_string(),
+            song: SongInfo {
+                title: song.title,
+            },
+            position: Some(position),
+        }));
+    }
+
+    /*
+     * Nothing is currently playing.
+     * Start this song immediately.
+     */
+    current.insert(chat_id, song.clone());
+    drop(current);
+
     println!("🎙️ Starting Telegram playback...");
 
-    state
-        .calls
-        .play(chat_id, &filename)
-        .await
-        .map_err(|e| {
-            eprintln!("❌ Playback failed: {e:?}");
+    if let Err(e) =
+        state.calls.play(chat_id, &song.filename).await
+    {
+        eprintln!("❌ Playback failed: {e:?}");
 
-            error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to start playback",
-            )
-        })?;
+        let mut current = state.current.lock().await;
+        current.remove(&chat_id);
+
+        return Err(error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to start playback",
+        ));
+    }
 
     println!("✅ Playback started");
 
     tokio::time::sleep(
-        std::time::Duration::from_secs(2)
+        std::time::Duration::from_secs(2),
     )
     .await;
 
@@ -170,8 +252,171 @@ async fn play(
     Ok(Json(PlayResponse {
         status: "playing".to_string(),
         song: SongInfo {
-            title,
+            title: song.title,
         },
+        position: None,
+    }))
+}
+
+async fn skip(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<PlayRequest>,
+) -> Result<
+    Json<SkipResponse>,
+    (StatusCode, Json<serde_json::Value>),
+> {
+    if !authorized(&headers, &state.worker_secret) {
+        return Err(error(
+            StatusCode::UNAUTHORIZED,
+            "Unauthorized",
+        ));
+    }
+
+    let chat_id = request.chat_id;
+
+    println!("⏭️ SKIP request for {chat_id}");
+
+    let next_song = {
+        let mut queues = state.queues.lock().await;
+
+        queues
+            .get_mut(&chat_id)
+            .and_then(|queue| queue.pop_front())
+    };
+
+    if let Some(song) = next_song {
+        println!("🎵 Starting next song: {}", song.title);
+
+        state
+            .calls
+            .play(chat_id, &song.filename)
+            .await
+            .map_err(|e| {
+                eprintln!("❌ Next playback failed: {e:?}");
+
+                error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to start next song",
+                )
+            })?;
+
+        tokio::time::sleep(
+            std::time::Duration::from_secs(2),
+        )
+        .await;
+
+        let _ = state.calls.unmute(chat_id).await;
+
+        let mut current = state.current.lock().await;
+        current.insert(chat_id, song.clone());
+
+        Ok(Json(SkipResponse {
+            status: "playing".to_string(),
+            title: Some(song.title),
+        }))
+    } else {
+        state.calls.stop(chat_id).await.ok();
+
+        let mut current = state.current.lock().await;
+        current.remove(&chat_id);
+
+        println!("⏹️ Queue empty, playback stopped");
+
+        Ok(Json(SkipResponse {
+            status: "stopped".to_string(),
+            title: None,
+        }))
+    }
+}
+
+async fn stop(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<PlayRequest>,
+) -> Result<
+    Json<StopResponse>,
+    (StatusCode, Json<serde_json::Value>),
+> {
+    if !authorized(&headers, &state.worker_secret) {
+        return Err(error(
+            StatusCode::UNAUTHORIZED,
+            "Unauthorized",
+        ));
+    }
+
+    let chat_id = request.chat_id;
+
+    println!("⏹️ STOP request for {chat_id}");
+
+    state.calls.stop(chat_id).await.map_err(|e| {
+        eprintln!("❌ Stop failed: {e:?}");
+
+        error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to stop playback",
+        )
+    })?;
+
+    {
+        let mut current = state.current.lock().await;
+        current.remove(&chat_id);
+    }
+
+    {
+        let mut queues = state.queues.lock().await;
+
+        if let Some(queue) = queues.get_mut(&chat_id) {
+            queue.clear();
+        }
+    }
+
+    println!("🧹 Playback and queue cleared");
+
+    Ok(Json(StopResponse {
+        status: "stopped".to_string(),
+    }))
+}
+
+async fn queue(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(chat_id): Path<i64>,
+) -> Result<
+    Json<QueueResponse>,
+    (StatusCode, Json<serde_json::Value>),
+> {
+    if !authorized(&headers, &state.worker_secret) {
+        return Err(error(
+            StatusCode::UNAUTHORIZED,
+            "Unauthorized",
+        ));
+    }
+
+    let current_song = {
+        let current = state.current.lock().await;
+        current.get(&chat_id).cloned()
+    };
+
+    let queued_songs = {
+        let queues = state.queues.lock().await;
+
+        queues
+            .get(&chat_id)
+            .map(|queue| queue.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+
+    Ok(Json(QueueResponse {
+        current: current_song.map(|song| SongInfo {
+            title: song.title,
+        }),
+        queue: queued_songs
+            .into_iter()
+            .map(|song| SongInfo {
+                title: song.title,
+            })
+            .collect(),
     }))
 }
 
@@ -207,6 +452,18 @@ async fn download_audio(
     Ok(query.to_string())
 }
 
+fn unique_id() -> u64 {
+    use std::time::{
+        SystemTime,
+        UNIX_EPOCH,
+    };
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
 fn authorized(
     headers: &HeaderMap,
     expected: &str,
@@ -236,4 +493,3 @@ fn error(
         })),
     )
 }
-
