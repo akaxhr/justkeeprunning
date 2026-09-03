@@ -26,21 +26,26 @@ async fn main() -> Result<()> {
 
     let calls = Calls::new(client);
 
-    println!("🎙️ Joining VC...");
+    println!("🎙️ Joining VC and starting playback...");
     println!("🎵 Playing test.mp3...");
 
     calls.play(CHAT_ID, "/app/test.mp3").await?;
 
     println!("✅ Playback started!");
 
-    // Give Telegram/ntgcalls a moment to establish the media state.
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-    println!("🔊 Unmuting music account...");
+    println!("🔊 Attempting automatic unmute...");
 
-    calls.unmute(CHAT_ID).await?;
+    match calls.unmute(CHAT_ID).await {
+        Ok(_) => {
+            println!("✅ calls.unmute() returned OK");
+        }
+        Err(e) => {
+            println!("❌ calls.unmute() FAILED: {e:?}");
+        }
+    }
 
-    println!("✅ Music account unmuted!");
     println!("🎵 Worker staying alive...");
 
     tokio::signal::ctrl_c().await?;
