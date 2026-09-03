@@ -52,38 +52,39 @@ pub async fn play(
         unique_id()
     );
 
-   let song = download_audio(&query, &filename)
+    let song = download_audio(&query, &filename)
+        .await
+        .map_err(|e| {
+            eprintln!("❌ Download failed: {e:?}");
+
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to download audio",
+            )
+        })?;
+
+    println!("🎧 Download complete: {}", song.title);
+
+    playback::play(
+        &state.calls,
+        chat_id,
+        &filename,
+    )
     .await
     .map_err(|e| {
-        eprintln!("❌ Download failed: {e:?}");
+        eprintln!("❌ Playback failed: {e:?}");
 
         error(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to download audio",
+            "Failed to start playback",
         )
     })?;
 
-println!("🎧 Download complete: {}", song.title);
-
-playback::play(
-    &state.calls,
-    chat_id,
-    &filename,
-)
-.await
-.map_err(|e| {
-    eprintln!("❌ Playback failed: {e:?}");
-
-    error(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Failed to start playback",
-    )
-})?;
-
-Ok(Json(PlayResponse {
-    status: "playing".to_string(),
-    song,
-}))
+    Ok(Json(PlayResponse {
+        status: "playing".to_string(),
+        song,
+    }))
+}
 
 fn unique_id() -> u64 {
     use std::time::{
