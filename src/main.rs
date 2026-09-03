@@ -41,9 +41,12 @@ async fn main() -> Result<()> {
     let calls = Arc::new(Calls::new(client));
 
     let state = AppState {
-        calls,
-        worker_secret,
-    };
+    calls,
+    worker_secret,
+    queues: Arc::new(tokio::sync::Mutex::new(
+        std::collections::HashMap::new(),
+    )),
+};
 
     let app = Router::new()
         .route("/play", post(routes::play::play))
