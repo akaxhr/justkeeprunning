@@ -6,7 +6,7 @@ use axum::{
 
 use crate::{
     auth::authorized,
-    downloader::download_audio,
+    downloader::get_audio,
     models::{PlayRequest, PlayResponse},
     playback,
     state::AppState,
@@ -28,7 +28,6 @@ pub async fn play(
     }
 
     let chat_id = request.chat_id;
-
     let query = request.query.trim().to_string();
 
     if query.is_empty() {
@@ -46,29 +45,25 @@ pub async fn play(
         println!("🎚️ Quality: {quality}");
     }
 
-    let filename = format!(
-        "/tmp/icha-{}-{}.mp3",
-        chat_id,
-        unique_id()
-    );
-
-    let song = download_audio(&query, &filename)
+    // Find the YouTube video and extract its direct audio URL.
+    let song = get_audio(&query)
         .await
         .map_err(|e| {
-            eprintln!("❌ Download failed: {e:?}");
+            eprintln!("❌ Audio extraction failed: {e:?}");
 
             error(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to download audio",
+                "Failed to find playable audio",
             )
         })?;
 
-    println!("🎧 Download complete: {}", song.title);
+    println!("🎧 Audio ready: {}", song.title);
 
+    // Start Telegram playback immediately.
     playback::play(
         &state.calls,
         chat_id,
-        &filename,
+        &song.url,
     )
     .await
     .map_err(|e| {
@@ -84,18 +79,6 @@ pub async fn play(
         status: "playing".to_string(),
         song,
     }))
-}
-
-fn unique_id() -> u64 {
-    use std::time::{
-        SystemTime,
-        UNIX_EPOCH,
-    };
-
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
 }
 
 fn error(
