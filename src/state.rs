@@ -14,6 +14,11 @@ pub struct QueueItem {
 pub struct ChatQueue {
     pub current: Option<QueueItem>,
     pub queue: VecDeque<QueueItem>,
+
+    // Changes whenever the queue lifecycle is reset.
+    // Prevents old background tasks from starting playback
+    // after the VC has ended.
+    pub generation: u64,
 }
 
 impl ChatQueue {
@@ -21,6 +26,7 @@ impl ChatQueue {
         Self {
             current: None,
             queue: VecDeque::new(),
+            generation: 0,
         }
     }
 }
