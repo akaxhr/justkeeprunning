@@ -38,11 +38,24 @@ async fn main() -> Result<()> {
     println!("🔊 Attempting automatic unmute...");
 
     match calls.unmute(CHAT_ID).await {
-        Ok(_) => {
-            println!("✅ calls.unmute() returned OK");
+        Ok(_) => println!("✅ calls.unmute() returned OK"),
+        Err(e) => println!("❌ calls.unmute() FAILED: {e:?}"),
+    }
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    println!("🔎 Checking VC participants...");
+
+    match calls.get_participants(CHAT_ID).await {
+        Ok(participants) => {
+            println!("👥 Participants found: {}", participants.len());
+
+            for p in participants {
+                println!("👤 PARTICIPANT: {p:?}");
+            }
         }
         Err(e) => {
-            println!("❌ calls.unmute() FAILED: {e:?}");
+            println!("❌ Failed to get participants: {e:?}");
         }
     }
 
