@@ -30,9 +30,17 @@ async fn main() -> Result<()> {
     println!("🎵 Playing test.mp3...");
 
     calls.play(CHAT_ID, "/app/test.mp3").await?;
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     println!("✅ Playback started!");
+
+    // Give Telegram/ntgcalls a moment to establish the media state.
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    println!("🔊 Unmuting music account...");
+
+    calls.unmute(CHAT_ID).await?;
+
+    println!("✅ Music account unmuted!");
     println!("🎵 Worker staying alive...");
 
     tokio::signal::ctrl_c().await?;
