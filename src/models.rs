@@ -21,4 +21,3 @@ pub struct PlayResponse {
     pub status: String,
     pub song: SongInfo,
 }
-
