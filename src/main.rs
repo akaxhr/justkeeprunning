@@ -7,7 +7,7 @@ const CHAT_ID: i64 = -1003843699243;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🎵 Icha Music Worker starting...");
+println!("🎵 Icha Music Worker starting — DEBUG PARTICIPANTS v2");
 
     let api_id: i32 = env::var("API_ID")?.parse()?;
     let api_hash = env::var("API_HASH")?;
