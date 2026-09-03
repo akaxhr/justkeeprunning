@@ -51,8 +51,7 @@ pub async fn play(
         .entry(chat_id)
         .or_insert_with(ChatQueue::new);
 
-    // If something is already playing,
-    // add this song to the waiting queue.
+    // Something is already playing.
     if chat_queue.current.is_some() {
         chat_queue.queue.push_back(QueueItem {
             query: query.clone(),
@@ -79,12 +78,15 @@ pub async fn play(
     }
 
     // Nothing is currently playing.
-    // Reserve the current slot BEFORE spawning the task.
     chat_queue.current = Some(QueueItem {
         query: query.clone(),
     });
 
-    println!("▶️ Starting first queued track: {query}");
+    let generation = chat_queue.generation;
+
+    println!(
+        "▶️ Starting first queued track: {query}"
+    );
 
     drop(queues);
 
@@ -101,6 +103,27 @@ pub async fn play(
             Ok(song) => {
                 println!("🎧 Audio ready: {}", song.title);
 
+                // Make sure this task still belongs to the
+                // current queue lifecycle.
+                let valid = {
+                    let queues = queues.lock().await;
+
+                    queues
+                        .get(&chat_id)
+                        .map(|queue| {
+                            queue.generation == generation
+                                && queue.current.is_some()
+                        })
+                        .unwrap_or(false)
+                };
+
+                if !valid {
+                    println!(
+                        "🛑 Ignoring stale playback task for chat {chat_id}"
+                    );
+                    return;
+                }
+
                 if let Err(e) = playback::play(
                     &calls,
                     chat_id,
@@ -112,13 +135,14 @@ pub async fn play(
                         "❌ Playback failed: {e:?}"
                     );
 
-                    // Remove the failed current track.
                     let mut queues = queues.lock().await;
 
                     if let Some(chat_queue) =
                         queues.get_mut(&chat_id)
                     {
-                        chat_queue.current = None;
+                        if chat_queue.generation == generation {
+                            chat_queue.current = None;
+                        }
                     }
                 }
             }
@@ -133,7 +157,9 @@ pub async fn play(
                 if let Some(chat_queue) =
                     queues.get_mut(&chat_id)
                 {
-                    chat_queue.current = None;
+                    if chat_queue.generation == generation {
+                        chat_queue.current = None;
+                    }
                 }
             }
         }
