@@ -47,11 +47,14 @@ pub async fn play(
 
     let calls = state.calls.clone();
 
+    // Keep a separate copy for the background task.
+    let background_query = query.clone();
+
     // Start the slow work in the background.
     tokio::spawn(async move {
         println!("⚡ Background playback task started");
 
-        match get_audio(&query).await {
+        match get_audio(&background_query).await {
             Ok(song) => {
                 println!("🎧 Audio ready: {}", song.title);
 
