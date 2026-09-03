@@ -136,11 +136,15 @@ async fn main() -> Result<()> {
     };
 
     let app = Router::new()
-        .route(
-            "/play",
-            post(routes::play::play),
-        )
-        .with_state(state);
+    .route(
+        "/play",
+        post(routes::play::play),
+    )
+    .route(
+        "/queue/{chat_id}",
+        axum::routing::get(routes::queue::queue),
+    )
+    .with_state(state);
 
     let port = env::var("PORT")
         .unwrap_or_else(|_| "8000".to_string());
