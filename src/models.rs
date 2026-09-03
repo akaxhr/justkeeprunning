@@ -21,3 +21,15 @@ pub struct PlayResponse {
     pub status: String,
     pub song: SongInfo,
 }
+
+#[derive(Debug, Serialize)]
+pub struct QueueItemResponse {
+    pub position: usize,
+    pub query: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct QueueResponse {
+    pub current: Option<String>,
+    pub queue: Vec<QueueItemResponse>,
+}
