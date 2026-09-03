@@ -14,7 +14,7 @@ use std::{
     env,
     sync::Arc,
 };
-use tgcalls::Calls;
+use tgcalls::{Calls, CallEvent};
 
 use state::AppState;
 
@@ -40,13 +40,79 @@ async fn main() -> Result<()> {
 
     let calls = Arc::new(Calls::new(client));
 
+    let queues = Arc::new(
+        tokio::sync::Mutex::new(
+            std::collections::HashMap::new(),
+        ),
+    );
+
+    // Listen for Telegram voice-chat lifecycle events.
+    let event_queues = queues.clone();
+
+    calls.on_event(move |chat_id, event| {
+        let queues = event_queues.clone();
+
+        match event {
+            CallEvent::Ended => {
+                println!(
+                    "🛑 Voice chat ended: {chat_id}"
+                );
+
+                tokio::spawn(async move {
+                    let mut queues = queues.lock().await;
+
+                    if let Some(queue) =
+                        queues.get_mut(&chat_id)
+                    {
+                        queue.current = None;
+                        queue.queue.clear();
+
+                        println!(
+                            "🧹 Queue cleared after VC ended: {chat_id}"
+                        );
+                    }
+                });
+            }
+
+            CallEvent::Left => {
+                println!(
+                    "🚪 Worker left voice chat: {chat_id}"
+                );
+
+                tokio::spawn(async move {
+                    let mut queues = queues.lock().await;
+
+                    if let Some(queue) =
+                        queues.get_mut(&chat_id)
+                    {
+                        queue.current = None;
+                        queue.queue.clear();
+
+                        println!(
+                            "🧹 Queue cleared after leaving VC: {chat_id}"
+                        );
+                    }
+                });
+            }
+
+            CallEvent::StreamEnded(_, _) => {
+                println!(
+                    "🎵 Stream ended in chat: {chat_id}"
+                );
+
+                // Automatic next-track playback
+                // will be connected here next.
+            }
+
+            _ => {}
+        }
+    });
+
     let state = AppState {
-    calls,
-    worker_secret,
-    queues: Arc::new(tokio::sync::Mutex::new(
-        std::collections::HashMap::new(),
-    )),
-};
+        calls,
+        worker_secret,
+        queues,
+    };
 
     let app = Router::new()
         .route("/play", post(routes::play::play))
@@ -57,7 +123,9 @@ async fn main() -> Result<()> {
 
     let address = format!("0.0.0.0:{port}");
 
-    println!("🌐 Music worker API listening on {address}");
+    println!(
+        "🌐 Music worker API listening on {address}"
+    );
 
     let listener =
         tokio::net::TcpListener::bind(&address).await?;
