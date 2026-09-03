@@ -1,3 +1,4 @@
+
 use anyhow::Result;
 use axum::{
     extract::State,
@@ -8,7 +9,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::{
     env,
-    path::PathBuf,
     sync::Arc,
 };
 use tgcalls::Calls;
@@ -41,11 +41,10 @@ struct PlayResponse {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🎵 Icha Music Worker starting — REAL MUSIC v1");
+    println!("🎵 Icha Music Worker starting — REAL MUSIC v2");
 
     let api_id: i32 = env::var("API_ID")?.parse()?;
     let api_hash = env::var("API_HASH")?;
-
     let worker_secret = env::var("WORKER_SECRET")?;
 
     println!("🔐 Loading Telegram session...");
@@ -89,8 +88,10 @@ async fn play(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<PlayRequest>,
-) -> Result<Json<PlayResponse>, (StatusCode, Json<serde_json::Value>)> {
-
+) -> Result<
+    Json<PlayResponse>,
+    (StatusCode, Json<serde_json::Value>),
+> {
     if !authorized(&headers, &state.worker_secret) {
         return Err(error(
             StatusCode::UNAUTHORIZED,
@@ -117,13 +118,18 @@ async fn play(
     println!("💬 Chat: {chat_id}");
     println!("🔎 Query: {query}");
 
+    if let Some(quality) = &request.quality {
+        println!("🎚️ Quality: {quality}");
+    }
+
     let filename = format!(
         "/tmp/icha-{}-{}.mp3",
         chat_id,
         std::process::id()
     );
 
-    let output = download_audio(&query, &filename).await
+    let title = download_audio(&query, &filename)
+        .await
         .map_err(|e| {
             eprintln!("❌ Download failed: {e:?}");
 
@@ -132,8 +138,6 @@ async fn play(
                 "Failed to download audio",
             )
         })?;
-
-    let title = output;
 
     println!("🎧 Download complete: {title}");
     println!("🎙️ Starting Telegram playback...");
@@ -155,25 +159,26 @@ async fn play(
 
     tokio::time::sleep(
         std::time::Duration::from_secs(2)
-    ).await;
+    )
+    .await;
 
     match state.calls.unmute(chat_id).await {
         Ok(_) => println!("🔊 Worker automatically unmuted"),
         Err(e) => println!("⚠️ Unmute failed: {e:?}"),
     }
 
- Ok(Json(PlayResponse {
-    status: "playing".to_string(),
-    song: SongInfo {
-        title,
-    },
-}))
+    Ok(Json(PlayResponse {
+        status: "playing".to_string(),
+        song: SongInfo {
+            title,
+        },
+    }))
+}
 
 async fn download_audio(
     query: &str,
     output: &str,
 ) -> Result<String> {
-
     println!("🔎 Searching YouTube: {query}");
 
     let search = format!("ytsearch1:{query}");
@@ -194,7 +199,9 @@ async fn download_audio(
         .await?;
 
     if !status.success() {
-        anyhow::bail!("yt-dlp exited with status {status}");
+        anyhow::bail!(
+            "yt-dlp exited with status {status}"
+        );
     }
 
     Ok(query.to_string())
@@ -218,8 +225,10 @@ fn authorized(
 fn error(
     status: StatusCode,
     message: &str,
-) -> (StatusCode, Json<serde_json::Value>) {
-
+) -> (
+    StatusCode,
+    Json<serde_json::Value>,
+) {
     (
         status,
         Json(serde_json::json!({
@@ -227,3 +236,4 @@ fn error(
         })),
     )
 }
+
