@@ -5,7 +5,8 @@ use tokio::process::Command;
 use crate::models::SongInfo;
 
 #[derive(Debug, Deserialize)]
-struct YtDlpInfo {
+struct SearchEntry {
+    id: Option<String>,
     title: Option<String>,
     uploader: Option<String>,
     channel: Option<String>,
@@ -22,32 +23,71 @@ pub async fn download_audio(
 
     let search = format!("ytsearch1:{query}");
 
-    /*
-     * First get metadata.
-     */
-    let metadata_output = Command::new("yt-dlp")
+    // Search YouTube and get the first result as JSON.
+    let search_output = Command::new("yt-dlp")
         .args([
-            "--no-playlist",
+            "--flat-playlist",
             "--dump-single-json",
             "--skip-download",
             &search,
         ])
         .output()
         .await
-        .context("Failed to run yt-dlp metadata search")?;
+        .context("Failed to run yt-dlp search")?;
+
+    if !search_output.status.success() {
+        let stderr =
+            String::from_utf8_lossy(&search_output.stderr);
+
+        anyhow::bail!(
+            "yt-dlp search failed: {stderr}"
+        );
+    }
+
+    let search_result: serde_json::Value =
+        serde_json::from_slice(&search_output.stdout)
+            .context("Failed to parse YouTube search result")?;
+
+    let entry = search_result
+        .get("entries")
+        .and_then(|entries| entries.as_array())
+        .and_then(|entries| entries.first())
+        .ok_or_else(|| anyhow::anyhow!("No YouTube results found"))?;
+
+    let video_id = entry
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("YouTube result has no video ID"))?;
+
+    let video_url = format!(
+        "https://www.youtube.com/watch?v={video_id}"
+    );
+
+    println!("🎯 Selected: {video_url}");
+
+    // Get complete metadata from the selected video.
+    let metadata_output = Command::new("yt-dlp")
+        .args([
+            "--dump-single-json",
+            "--skip-download",
+            &video_url,
+        ])
+        .output()
+        .await
+        .context("Failed to get video metadata")?;
 
     if !metadata_output.status.success() {
         let stderr =
             String::from_utf8_lossy(&metadata_output.stderr);
 
         anyhow::bail!(
-            "yt-dlp metadata search failed: {stderr}"
+            "yt-dlp metadata failed: {stderr}"
         );
     }
 
-    let metadata: YtDlpInfo =
+    let metadata: SearchEntry =
         serde_json::from_slice(&metadata_output.stdout)
-            .context("Failed to parse yt-dlp metadata")?;
+            .context("Failed to parse video metadata")?;
 
     let title = metadata
         .title
@@ -64,10 +104,6 @@ pub async fn download_audio(
 
     let thumbnail = metadata.thumbnail;
 
-    let url = metadata
-        .webpage_url
-        .unwrap_or_else(|| search.clone());
-
     println!("🎵 Found: {title}");
     println!("👤 Artist/Channel: {artist}");
     println!("⏱️ Duration: {duration}s");
@@ -76,9 +112,7 @@ pub async fn download_audio(
         println!("🖼️ Thumbnail found");
     }
 
-    /*
-     * Now download the audio.
-     */
+    // Download the EXACT selected video.
     println!("⬇️ Downloading audio...");
 
     let status = Command::new("yt-dlp")
@@ -91,7 +125,7 @@ pub async fn download_audio(
             "192K",
             "--output",
             output,
-            &search,
+            &video_url,
         ])
         .status()
         .await
@@ -110,6 +144,6 @@ pub async fn download_audio(
         artist,
         duration,
         thumbnail,
-        url,
+        url: video_url,
     })
 }
