@@ -7,9 +7,13 @@ pub struct PlayRequest {
     pub quality: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct SongInfo {
     pub title: String,
+    pub artist: String,
+    pub duration: u64,
+    pub thumbnail: Option<String>,
+    pub url: String,
 }
 
 #[derive(Debug, Serialize)]
