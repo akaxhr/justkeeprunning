@@ -29,9 +29,14 @@ struct PlayRequest {
 }
 
 #[derive(Debug, Serialize)]
+struct SongInfo {
+    title: String,
+}
+
+#[derive(Debug, Serialize)]
 struct PlayResponse {
     status: String,
-    title: String,
+    song: SongInfo,
 }
 
 #[tokio::main]
@@ -157,11 +162,12 @@ async fn play(
         Err(e) => println!("⚠️ Unmute failed: {e:?}"),
     }
 
-    Ok(Json(PlayResponse {
-        status: "playing".to_string(),
+ Ok(Json(PlayResponse {
+    status: "playing".to_string(),
+    song: SongInfo {
         title,
-    }))
-}
+    },
+}))
 
 async fn download_audio(
     query: &str,
