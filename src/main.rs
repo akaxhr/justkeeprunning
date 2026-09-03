@@ -41,10 +41,13 @@ async fn main() -> Result<()> {
     let calls = Arc::new(Calls::new(client));
 
     let queues = Arc::new(
-        tokio::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        ),
-    );
+    tokio::sync::Mutex::new(
+        std::collections::HashMap::<
+            i64,
+            state::ChatQueue,
+        >::new(),
+    ),
+);
 
     // Listen for Telegram voice-chat lifecycle events.
     let event_queues = queues.clone();
