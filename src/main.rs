@@ -30,6 +30,7 @@ async fn main() -> Result<()> {
     println!("🎵 Playing test.mp3...");
 
     calls.play(CHAT_ID, "/app/test.mp3").await?;
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     println!("✅ Playback started!");
     println!("🎵 Worker staying alive...");
