@@ -1,7 +1,8 @@
 FROM rust:1.89-bookworm
 
 RUN apt-get update && \
-    apt-get install -y ffmpeg pkg-config libssl-dev cmake && \
+    apt-get install -y ffmpeg pkg-config libssl-dev cmake python3 python3-pip && \
+    pip3 install --break-system-packages yt-dlp && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
