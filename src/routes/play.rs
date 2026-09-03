@@ -7,7 +7,7 @@ use axum::{
 use crate::{
     auth::authorized,
     downloader::get_audio,
-    models::{PlayRequest, PlayResponse},
+    models::{PlayRequest, PlayResponse, SongInfo},
     playback,
     state::AppState,
 };
@@ -45,38 +45,48 @@ pub async fn play(
         println!("🎚️ Quality: {quality}");
     }
 
-    // Find the YouTube video and extract its direct audio URL.
-    let song = get_audio(&query)
-        .await
-        .map_err(|e| {
-            eprintln!("❌ Audio extraction failed: {e:?}");
+    let calls = state.calls.clone();
 
-            error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to find playable audio",
-            )
-        })?;
+    // Start the slow work in the background.
+    tokio::spawn(async move {
+        println!("⚡ Background playback task started");
 
-    println!("🎧 Audio ready: {}", song.title);
+        match get_audio(&query).await {
+            Ok(song) => {
+                println!("🎧 Audio ready: {}", song.title);
 
-    // Start Telegram playback immediately.
-    playback::play(
-        &state.calls,
-        chat_id,
-        &song.url,
-    )
-    .await
-    .map_err(|e| {
-        eprintln!("❌ Playback failed: {e:?}");
+                if let Err(e) = playback::play(
+                    &calls,
+                    chat_id,
+                    &song.url,
+                )
+                .await
+                {
+                    eprintln!(
+                        "❌ Background playback failed: {e:?}"
+                    );
+                }
+            }
 
-        error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to start playback",
-        )
-    })?;
+            Err(e) => {
+                eprintln!(
+                    "❌ Background audio extraction failed: {e:?}"
+                );
+            }
+        }
+    });
+
+    // Respond immediately.
+    let song = SongInfo {
+        title: query.clone(),
+        artist: "Searching...".to_string(),
+        duration: 0,
+        thumbnail: None,
+        url: String::new(),
+    };
 
     Ok(Json(PlayResponse {
-        status: "playing".to_string(),
+        status: "queued".to_string(),
         song,
     }))
 }
