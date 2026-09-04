@@ -45,133 +45,134 @@ pub async fn play(
         println!("🎚️ Quality: {quality}");
     }
 
-    let mut queues = state.queues.lock().await;
+    // ─────────────────────────────────────────
+    // Check whether something is already playing
+    // ─────────────────────────────────────────
 
-    let chat_queue = queues
-        .entry(chat_id)
-        .or_insert_with(ChatQueue::new);
+    {
+        let mut queues = state.queues.lock().await;
 
-    // Something is already playing.
-    if chat_queue.current.is_some() {
-        chat_queue.queue.push_back(QueueItem {
-            query: query.clone(),
-        });
+        let chat_queue = queues
+            .entry(chat_id)
+            .or_insert_with(ChatQueue::new);
 
-        let position = chat_queue.queue.len();
+        if chat_queue.current.is_some() {
+            chat_queue.queue.push_back(QueueItem {
+                query: query.clone(),
+            });
 
-        println!(
-            "📥 Added to queue: {query} (position {position})"
-        );
+            let position =
+                chat_queue.queue.len();
 
-        let song = SongInfo {
-            title: query.clone(),
-            artist: "Waiting in queue".to_string(),
-            duration: 0,
-            thumbnail: None,
-            url: String::new(),
-        };
+            println!(
+                "📥 Added to queue: {query} (position {position})"
+            );
 
-        return Ok(Json(PlayResponse {
-            status: "queued".to_string(),
-            song,
-        }));
+            let song = SongInfo {
+                title: query.clone(),
+                artist: "Waiting in queue".to_string(),
+                duration: 0,
+                thumbnail: None,
+                url: String::new(),
+            };
+
+            return Ok(Json(PlayResponse {
+                status: "queued".to_string(),
+                song,
+            }));
+        }
     }
 
-    // Nothing is currently playing.
-    chat_queue.current = Some(QueueItem {
-        query: query.clone(),
-    });
-
-    let generation = chat_queue.generation;
+    // ─────────────────────────────────────────
+    // First track
+    // Extract BEFORE returning to JS
+    // ─────────────────────────────────────────
 
     println!(
-        "▶️ Starting first queued track: {query}"
+        "🔎 Extracting first track: {query}"
     );
 
-    drop(queues);
+    let song = match get_audio(&query).await {
+        Ok(song) => song,
 
-    let calls = state.calls.clone();
-    let queues = state.queues.clone();
+        Err(e) => {
+            eprintln!(
+                "❌ Audio extraction failed: {e:?}"
+            );
 
-    let background_query = query.clone();
+            return Err(error(
+                StatusCode::BAD_GATEWAY,
+                &format!(
+                    "Could not prepare this song: {e}"
+                ),
+            ));
+        }
+    };
 
-    tokio::spawn(async move {
-        println!("⚡ Background playback task started");
-        println!("🔎 Extracting: {background_query}");
+    println!(
+        "🎧 Audio ready: {}",
+        song.title
+    );
 
-        match get_audio(&background_query).await {
-            Ok(song) => {
-                println!("🎧 Audio ready: {}", song.title);
+    // ─────────────────────────────────────────
+    // Mark current track
+    // ─────────────────────────────────────────
 
-                // Make sure this task still belongs to the
-                // current queue lifecycle.
-                let valid = {
-                    let queues = queues.lock().await;
+    let generation = {
+        let mut queues =
+            state.queues.lock().await;
 
-                    queues
-                        .get(&chat_id)
-                        .map(|queue| {
-                            queue.generation == generation
-                                && queue.current.is_some()
-                        })
-                        .unwrap_or(false)
-                };
+        let chat_queue = queues
+            .entry(chat_id)
+            .or_insert_with(ChatQueue::new);
 
-                if !valid {
-                    println!(
-                        "🛑 Ignoring stale playback task for chat {chat_id}"
-                    );
-                    return;
-                }
-
-                if let Err(e) = playback::play(
-                    &calls,
-                    chat_id,
-                    &song.url,
-                )
-                .await
-                {
-                    eprintln!(
-                        "❌ Playback failed: {e:?}"
-                    );
-
-                    let mut queues = queues.lock().await;
-
-                    if let Some(chat_queue) =
-                        queues.get_mut(&chat_id)
-                    {
-                        if chat_queue.generation == generation {
-                            chat_queue.current = None;
-                        }
-                    }
-                }
+        chat_queue.current = Some(
+            QueueItem {
+                query: query.clone(),
             }
+        );
 
-            Err(e) => {
-                eprintln!(
-                    "❌ Background audio extraction failed: {e:?}"
-                );
+        chat_queue.generation
+    };
 
-                let mut queues = queues.lock().await;
+    // ─────────────────────────────────────────
+    // Start playback
+    // ─────────────────────────────────────────
 
-                if let Some(chat_queue) =
-                    queues.get_mut(&chat_id)
-                {
-                    if chat_queue.generation == generation {
-                        chat_queue.current = None;
-                    }
-                }
+    if let Err(e) = playback::play(
+        &state.calls,
+        chat_id,
+        &song.url,
+    )
+    .await
+    {
+        eprintln!(
+            "❌ Playback failed: {e:?}"
+        );
+
+        let mut queues =
+            state.queues.lock().await;
+
+        if let Some(queue) =
+            queues.get_mut(&chat_id)
+        {
+            if queue.generation == generation {
+                queue.current = None;
             }
         }
-    });
 
-    let song = SongInfo {
-        title: query.clone(),
-        artist: "Searching...".to_string(),
-        duration: 0,
-        thumbnail: None,
-        url: String::new(),
-    };
+        return Err(error(
+            StatusCode::BAD_GATEWAY,
+            &format!(
+                "Could not start playback: {e}"
+            ),
+        ));
+    }
+
+    println!(
+        "▶️ Now playing: {}",
+        song.title
+    );
 
     Ok(Json(PlayResponse {
         status: "playing".to_string(),
