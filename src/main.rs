@@ -50,9 +50,14 @@ async fn main() -> Result<()> {
     let event_queues = queues.clone();
     let event_calls = calls.clone();
 
-    calls.on_event(move |chat_id, event| {
-        let queues = event_queues.clone();
-        let calls = event_calls.clone();
+calls.on_event(move |chat_id, event| {
+    println!(
+        "📡 CALL EVENT | chat={chat_id} | {:?}",
+        event
+    );
+
+    let queues = event_queues.clone();
+    let calls = event_calls.clone();
 
         match event {
             // ─────────────────────────────────────
