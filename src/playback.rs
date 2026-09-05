@@ -10,14 +10,21 @@ pub async fn play(
     println!("🎙️ Starting Telegram playback...");
     println!("🔗 Audio stream URL ready");
 
+    let joined_before = calls.is_joined(chat_id).await;
+
+    println!(
+        "📡 tgcalls state before play: joined={joined_before}"
+    );
+
     calls.play(chat_id, audio_url).await?;
 
     println!("✅ Playback started");
 
-    tokio::time::sleep(
-        std::time::Duration::from_secs(2),
-    )
-    .await;
+    let joined_after = calls.is_joined(chat_id).await;
+
+    println!(
+        "📡 tgcalls state after play: joined={joined_after}"
+    );
 
     match calls.unmute(chat_id).await {
         Ok(_) => println!("🔊 Worker automatically unmuted"),
