@@ -10,6 +10,7 @@ use axum::{
     routing::post,
     Router,
 };
+use futures_util::StreamExt;
 use std::{
     collections::HashMap,
     env,
@@ -17,11 +18,13 @@ use std::{
 };
 use tgcalls::{CallEvent, Calls};
 
+use ferogram::filters::Dispatcher;
+
 use state::{AppState, ChatQueue};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🎵 Icha Music Worker starting — MODULAR v2");
+    println!("🎵 Icha Music Worker starting — MODULAR v3");
 
     let api_id: i32 = env::var("API_ID")?.parse()?;
     let api_hash = env::var("API_HASH")?;
@@ -39,7 +42,11 @@ async fn main() -> Result<()> {
 
     println!("✅ Telegram music account connected!");
 
-    let calls = Arc::new(Calls::new(client));
+    // ==================================================
+    // TGCALLS
+    // ==================================================
+
+    let calls = Calls::new(client.clone());
 
     let queues = Arc::new(
         tokio::sync::Mutex::new(
@@ -47,74 +54,28 @@ async fn main() -> Result<()> {
         ),
     );
 
+    // ==================================================
+    // TGCALLS EVENTS
+    // ==================================================
+
     let event_queues = queues.clone();
     let event_calls = calls.clone();
 
-calls.on_event(move |chat_id, event| {
-    println!(
-        "📡 CALL EVENT | chat={chat_id} | {:?}",
-        event
-    );
+    calls.on_event(move |chat_id, event| {
+        println!(
+            "📡 CALL EVENT | chat={chat_id} | {:?}",
+            event
+        );
 
-    let queues = event_queues.clone();
-    let calls = event_calls.clone();
+        let queues = event_queues.clone();
+        let calls = event_calls.clone();
 
         match event {
-            // ─────────────────────────────────────
-            // VC ENDED
-            // ─────────────────────────────────────
-            CallEvent::Ended => {
-                println!(
-                    "🛑 Voice chat ended: {chat_id}"
-                );
 
-                tokio::spawn(async move {
-                    let mut queues =
-                        queues.lock().await;
+            // ------------------------------------------
+            // SONG FINISHED
+            // ------------------------------------------
 
-                    if let Some(queue) =
-                        queues.get_mut(&chat_id)
-                    {
-                        queue.generation += 1;
-                        queue.current = None;
-                        queue.queue.clear();
-
-                        println!(
-                            "🧹 Queue completely cleared: {chat_id}"
-                        );
-                    }
-                });
-            }
-
-            // ─────────────────────────────────────
-            // WORKER LEFT
-            // ─────────────────────────────────────
-            CallEvent::Left => {
-                println!(
-                    "🚪 Worker left voice chat: {chat_id}"
-                );
-
-                tokio::spawn(async move {
-                    let mut queues =
-                        queues.lock().await;
-
-                    if let Some(queue) =
-                        queues.get_mut(&chat_id)
-                    {
-                        queue.generation += 1;
-                        queue.current = None;
-                        queue.queue.clear();
-
-                        println!(
-                            "🧹 Queue cleared after worker left: {chat_id}"
-                        );
-                    }
-                });
-            }
-
-            // ─────────────────────────────────────
-            // CURRENT TRACK FINISHED
-            // ─────────────────────────────────────
             CallEvent::StreamEnded(_, _) => {
                 println!(
                     "🎵 Stream ended in chat: {chat_id}"
@@ -123,7 +84,43 @@ calls.on_event(move |chat_id, event| {
                 tokio::spawn(async move {
                     play_next(
                         chat_id,
-                        calls,
+                        Arc::new(calls),
+                        queues,
+                    )
+                    .await;
+                });
+            }
+
+            // ------------------------------------------
+            // VOICE CHAT ENDED
+            // ------------------------------------------
+
+            CallEvent::Ended => {
+                println!(
+                    "🛑 Voice chat ended: {chat_id}"
+                );
+
+                tokio::spawn(async move {
+                    clear_chat_queue(
+                        chat_id,
+                        queues,
+                    )
+                    .await;
+                });
+            }
+
+            // ------------------------------------------
+            // WORKER LEFT
+            // ------------------------------------------
+
+            CallEvent::Left => {
+                println!(
+                    "🚪 Worker left voice chat: {chat_id}"
+                );
+
+                tokio::spawn(async move {
+                    clear_chat_queue(
+                        chat_id,
                         queues,
                     )
                     .await;
@@ -134,29 +131,81 @@ calls.on_event(move |chat_id, event| {
         }
     });
 
+    // ==================================================
+    // FEROGRAM DISPATCHER
+    //
+    // THIS IS THE IMPORTANT FIX.
+    //
+    // tgcalls implements Ferogram Middleware.
+    // Without this, Telegram VC updates never reach
+    // tgcalls' CallEvent system.
+    // ==================================================
+
+    let mut dispatcher = Dispatcher::new();
+
+    dispatcher.middleware(calls.clone());
+
+    println!("📡 tgcalls middleware registered");
+
+    // ==================================================
+    // TELEGRAM UPDATE LOOP
+    // ==================================================
+
+    let update_client = client.clone();
+
+    tokio::spawn(async move {
+        println!("📡 Telegram update listener starting...");
+
+        let mut stream =
+            update_client.stream_updates();
+
+        while let Some(update) =
+            stream.next().await
+        {
+            dispatcher.dispatch(update).await;
+        }
+
+        println!(
+            "⚠️ Telegram update stream ended"
+        );
+    });
+
+    println!(
+        "✅ Telegram update listener running"
+    );
+
+    // ==================================================
+    // AXUM STATE
+    // ==================================================
+
     let state = AppState {
-        calls,
+        calls: Arc::new(calls.clone()),
         worker_secret,
-        queues,
+        queues: queues.clone(),
     };
 
+    // ==================================================
+    // HTTP API
+    // ==================================================
+
     let app = Router::new()
-    .route(
-        "/play",
-        post(routes::play::play),
-    )
-    .route(
-        "/queue/{chat_id}",
-        axum::routing::get(routes::queue::queue),
-    )
-    .with_state(state);
+        .route(
+            "/play",
+            post(routes::play::play),
+        )
+        .route(
+            "/queue/{chat_id}",
+            axum::routing::get(
+                routes::queue::queue
+            ),
+        )
+        .with_state(state);
 
     let port = env::var("PORT")
         .unwrap_or_else(|_| "8000".to_string());
 
-    let address = format!(
-        "0.0.0.0:{port}"
-    );
+    let address =
+        format!("0.0.0.0:{port}");
 
     println!(
         "🌐 Music worker API listening on {address}"
@@ -165,6 +214,14 @@ calls.on_event(move |chat_id, event| {
     let listener =
         tokio::net::TcpListener::bind(&address)
             .await?;
+
+    println!(
+        "🚀 Icha Music Worker fully started"
+    );
+
+    // ==================================================
+    // AXUM SERVER
+    // ==================================================
 
     axum::serve(
         listener,
@@ -176,9 +233,38 @@ calls.on_event(move |chat_id, event| {
 }
 
 
-// ═══════════════════════════════════════════════
+// ======================================================
+// CLEAR CHAT QUEUE
+// ======================================================
+
+async fn clear_chat_queue(
+    chat_id: i64,
+    queues: Arc<
+        tokio::sync::Mutex<
+            HashMap<i64, ChatQueue>,
+        >,
+    >,
+) {
+    let mut queues =
+        queues.lock().await;
+
+    if let Some(queue) =
+        queues.get_mut(&chat_id)
+    {
+        queue.generation += 1;
+        queue.current = None;
+        queue.queue.clear();
+
+        println!(
+            "🧹 Queue completely cleared: {chat_id}"
+        );
+    }
+}
+
+
+// ======================================================
 // PLAY NEXT TRACK
-// ═══════════════════════════════════════════════
+// ======================================================
 
 async fn play_next(
     chat_id: i64,
@@ -190,10 +276,6 @@ async fn play_next(
     >,
 ) {
     loop {
-        // ─────────────────────────────────────
-        // Get next item
-        // ─────────────────────────────────────
-
         let next = {
             let mut queues =
                 queues.lock().await;
@@ -237,10 +319,6 @@ async fn play_next(
         println!(
             "⚡ Preparing next track: {query}"
         );
-
-        // ─────────────────────────────────────
-        // Extract audio
-        // ─────────────────────────────────────
 
         let song =
             match crate::downloader::get_audio(
@@ -292,10 +370,9 @@ async fn play_next(
             song.title
         );
 
-        // ─────────────────────────────────────
-        // Make sure queue wasn't stopped/cleared
-        // while yt-dlp was working
-        // ─────────────────────────────────────
+        // ------------------------------------------
+        // MAKE SURE QUEUE WAS NOT CLEARED
+        // ------------------------------------------
 
         let valid = {
             let queues =
@@ -319,9 +396,9 @@ async fn play_next(
             return;
         }
 
-        // ─────────────────────────────────────
-        // Start playback
-        // ─────────────────────────────────────
+        // ------------------------------------------
+        // START NEXT SONG
+        // ------------------------------------------
 
         match crate::playback::play(
             &calls,
